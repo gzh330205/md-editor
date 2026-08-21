@@ -7,10 +7,21 @@ set -euo pipefail
 VERSION="${1:?usage: release.sh <version>}"
 cd "$(dirname "$0")/.."
 
+# 定位 gh（PATH 找不到时尝试常见安装路径）
+if ! command -v gh >/dev/null 2>&1; then
+  for p in "/c/Program Files/GitHub CLI" "/d/Program Files/GitHub CLI" \
+           "$LOCALAPPDATA/Microsoft/WinGet/Links" "$USERPROFILE/AppData/Local/Programs/GitHub CLI"; do
+    if [ -x "$p/gh.exe" ]; then
+      export PATH="$p:$PATH"
+      break
+    fi
+  done
+fi
 command -v gh >/dev/null || { echo "错误: 未安装 GitHub CLI，请先: winget install GitHub.cli"; exit 1; }
 gh auth status >/dev/null 2>&1 || { echo "错误: 未登录 GitHub，请先: gh auth login"; exit 1; }
 
-export TAURI_SIGNING_PRIVATE_KEY_PATH="$HOME/.tauri/md-editor.key"
+export TAURI_SIGNING_PRIVATE_KEY="$(cat "$HOME/.tauri/md-editor.key")"
+export TAURI_SIGNING_PRIVATE_KEY_PATH="$(cygpath -w "$HOME/.tauri/md-editor.key" 2>/dev/null || echo "$HOME/.tauri/md-editor.key")"
 export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$(cat "$HOME/.tauri/md-editor.key.password")"
 
 # 1. 版本号一致性检查
