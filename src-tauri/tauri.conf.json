@@ -24,6 +24,17 @@
       "csp": null
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDNEMzk0MDlGNzE1QzI1QzIKUldUQ0pWeHhuMEE1UFhjTy9vVzMyZC9OczdmR1dUall5UEZIRFROTzUxbyszYjc3UW1LdGRTMlcK",
+      "endpoints": [
+        "https://github.com/gzh330205/md-editor/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",

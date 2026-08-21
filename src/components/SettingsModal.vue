@@ -2,11 +2,12 @@
 import { DEFAULT_SETTINGS, FONT_OPTIONS } from '../types'
 import type { AppSettings, ThemeMode } from '../types'
 
-defineProps<{ visible: boolean; settings: AppSettings }>()
+defineProps<{ visible: boolean; settings: AppSettings; version: string }>()
 
 const emit = defineEmits<{
   (e: 'close'): void
   (e: 'change', patch: Partial<AppSettings>): void
+  (e: 'check-update'): void
 }>()
 
 function onThemeMode(e: Event) {
@@ -56,7 +57,13 @@ function restoreDefaults() {
         </select>
       </label>
 
+      <div class="field">
+        <span>当前版本</span>
+        <span class="version">{{ version ? `v${version}` : '—' }}</span>
+      </div>
+
       <div class="modal-actions">
+        <button @click="emit('check-update')">检查更新</button>
         <button @click="restoreDefaults">恢复默认</button>
         <button class="primary" @click="emit('close')">关闭</button>
       </div>
@@ -108,6 +115,11 @@ function restoreDefaults() {
   border-radius: 6px;
   background: var(--btn-bg);
   color: var(--text);
+}
+
+.field .version {
+  font-size: 13px;
+  color: var(--muted);
 }
 
 .modal-actions {

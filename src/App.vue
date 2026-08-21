@@ -2,6 +2,9 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { openUrl } from '@tauri-apps/plugin-opener'
+import { getVersion } from '@tauri-apps/api/app'
+import { check } from '@tauri-apps/plugin-updater'
+import type { Update } from '@tauri-apps/plugin-updater'
 import { load } from '@tauri-apps/plugin-store'
 import type { Store } from '@tauri-apps/plugin-store'
 import { EditorState, StateEffect } from '@codemirror/state'
@@ -189,6 +192,60 @@ function renderMarkdown(src: string): string {
   const out = marked.parser(tokens, opts)
   currentLineMap = null
   return out
+}
+
+// ---------- 应用更新 ----------
+const appVersion = ref('')
+const updateState = ref<'idle' | 'checking' | 'available' | 'downloading' | 'done'>('idle')
+const updateInfo = ref<{ version: string } | null>(null)
+const updateProgress = ref(0)
+let pendingUpdate: Update | null = null
+let updateTimer: number | undefined
+
+async function checkForUpdate(manual: boolean) {
+  if (updateState.value === 'checking' || updateState.value === 'downloading') return
+  updateState.value = 'checking'
+  try {
+    const update = await check()
+    if (!update) {
+      updateState.value = 'idle'
+      if (manual) window.alert(`当前已是最新版本（v${appVersion.value}）`)
+      return
+    }
+    pendingUpdate = update
+    updateInfo.value = { version: update.version }
+    updateState.value = 'available'
+  } catch (e) {
+    updateState.value = 'idle'
+    if (manual) window.alert(`检查更新失败：${e}`)
+  }
+}
+
+async function doUpdate() {
+  if (!pendingUpdate) {
+    await checkForUpdate(true)
+    if (!pendingUpdate) return
+  }
+  updateState.value = 'downloading'
+  updateProgress.value = 0
+  let downloaded = 0
+  let total = 0
+  try {
+    await pendingUpdate.downloadAndInstall((event) => {
+      if (event.event === 'Started') {
+        total = event.data.contentLength ?? 0
+      } else if (event.event === 'Progress') {
+        downloaded += event.data.chunkLength
+        if (total > 0) updateProgress.value = Math.min(99, Math.round((downloaded / total) * 100))
+      }
+    })
+    updateProgress.value = 100
+    updateState.value = 'done'
+    window.setTimeout(() => window.location.reload(), 1500)
+  } catch (e) {
+    updateState.value = 'available'
+    window.alert(`更新失败：${e}`)
+  }
 }
 
 // ---------- 状态 ----------
@@ -810,7 +867,18 @@ onMounted(() => {
   previewPaneEl.value?.addEventListener('scroll', onPreviewScroll)
 
   void initStore()
+  void initUpdater()
 })
+
+async function initUpdater() {
+  try {
+    appVersion.value = await getVersion()
+  } catch {
+    appVersion.value = ''
+  }
+  // 启动 5 秒后自动检查一次更新（静默，不打扰）
+  updateTimer = window.setTimeout(() => void checkForUpdate(false), 5000)
+}
 
 onBeforeUnmount(() => {
   editorView?.scrollDOM.removeEventListener('scroll', onEditorScroll)
@@ -819,6 +887,7 @@ onBeforeUnmount(() => {
   mq.removeEventListener('change', onSchemeChange)
   themeStyleEl.remove()
   window.clearTimeout(renderTimer)
+  window.clearTimeout(updateTimer)
   editorView?.destroy()
   editorView = null
 })
@@ -826,6 +895,18 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="app">
+    <div v-if="updateState === 'available'" class="update-banner">
+      <span class="update-text">
+        🎉 发现新版本 <b>v{{ updateInfo?.version }}</b>（当前 v{{ appVersion }}）
+      </span>
+      <button class="update-btn" @click="doUpdate">立即更新</button>
+      <button class="update-later" @click="updateState = 'idle'">稍后</button>
+    </div>
+    <div v-else-if="updateState === 'downloading'" class="update-banner">
+      <span class="update-text">⏬ 正在下载更新… {{ updateProgress }}%</span>
+      <div class="update-progress"><div class="update-progress-bar" :style="{ width: updateProgress + '%' }"></div></div>
+    </div>
+
     <header class="toolbar">
       <span class="brand">📝 Markdown 编辑器</span>
       <div class="btn-group">
@@ -893,8 +974,10 @@ onBeforeUnmount(() => {
     <SettingsModal
       :visible="showSettings"
       :settings="settings"
+      :version="appVersion"
       @close="showSettings = false"
       @change="updateSettings"
+      @check-update="checkForUpdate(true)"
     />
   </div>
 </template>
@@ -958,6 +1041,67 @@ body {
   flex-direction: column;
   height: 100%;
   overflow: hidden;
+}
+
+/* ---------- 更新横幅 ---------- */
+.update-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--text);
+  flex: none;
+}
+
+.update-text {
+  flex: 1;
+}
+
+.update-btn {
+  padding: 4px 14px;
+  font-size: 13px;
+  font-family: inherit;
+  border: none;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+
+.update-btn:hover {
+  filter: brightness(1.1);
+}
+
+.update-later {
+  padding: 4px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--btn-bg);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.update-later:hover {
+  background: var(--btn-hover);
+}
+
+.update-progress {
+  flex: 1;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--btn-hover);
+  overflow: hidden;
+}
+
+.update-progress-bar {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s;
 }
 
 /* ---------- 工具栏 ---------- */
