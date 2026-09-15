@@ -868,15 +868,38 @@ function onGlobalKey(e: KeyboardEvent) {
 let syncSource: 'editor' | 'preview' | null = null
 let syncUntil = 0
 
-/** 编辑器滚动 → 预览定位：找到第一个源码行号 >= 视口顶部行的块元素 */
+const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v)
+
+/**
+ * 把锚点算出的中段目标，在「距末尾一个视口」内平滑地拉到面板末尾。
+ *
+ * 为什么必须补这一段：锚点法统一把「视口首行对应的块」对齐到面板顶部，
+ * 它在文档末尾一定够不到底——预览把同样的内容排得更高，编辑器到底时
+ * 视口首行下面还剩将近一屏的预览内容，于是「左侧到底了，右侧还差一屏」。
+ *
+ * 这里用凸组合 `anchor*(1-w) + max*w` 而不是和「底部对齐」之类的另一个锚点混合：
+ * 因为 `anchor ≤ max` 且 `anchor`、`w` 都随滚动单调不减，
+ * 组合结果必然单调不减，不会出现「越滚越往回退、最后突然跳到底」。
+ */
+function endCorrection(anchor: number, max: number, scrolled: number, limit: number, ramp: number) {
+  const a = Math.min(max, Math.max(0, anchor))
+  const w = ramp > 0 ? clamp01(1 - (limit - scrolled) / ramp) : 0
+  return a * (1 - w) + max * w
+}
+
+/** 编辑器滚动 → 预览定位：第一个源码行号 >= 视口首行的块，对齐到面板顶部 */
 function syncEditorToPreview() {
   if (!editorView || !previewPaneEl.value) return
-  const lineBlock = editorView.lineBlockAtHeight(editorView.scrollDOM.scrollTop)
-  const line = editorView.state.doc.lineAt(lineBlock.from).number
+  const scroller = editorView.scrollDOM
   const pane = previewPaneEl.value
-  const candidates = pane.querySelectorAll<HTMLElement>('[data-line]')
+  const viewport = scroller.clientHeight
+  if (viewport <= 0) return
+  const line = editorView.state.doc.lineAt(
+    editorView.lineBlockAtHeight(scroller.scrollTop).from,
+  ).number
+
   let target: HTMLElement | null = null
-  for (const el of candidates) {
+  for (const el of pane.querySelectorAll<HTMLElement>('[data-line]')) {
     const l = Number(el.dataset.line ?? 0)
     if (l >= line) {
       target = el
@@ -885,15 +908,28 @@ function syncEditorToPreview() {
     target = el
   }
   if (!target) return
-  const paneRect = pane.getBoundingClientRect()
-  const elRect = target.getBoundingClientRect()
-  pane.scrollTop += elRect.top - paneRect.top - 8
+
+  const editorMax = Math.max(0, scroller.scrollHeight - viewport)
+  const previewMax = Math.max(0, pane.scrollHeight - pane.clientHeight)
+  const paneOrigin = pane.getBoundingClientRect().top - pane.scrollTop
+  const anchor = target.getBoundingClientRect().top - paneOrigin - 8
+
+  pane.scrollTop = endCorrection(
+    anchor,
+    previewMax,
+    scroller.scrollTop,
+    editorMax,
+    Math.min(viewport, editorMax),
+  )
 }
 
-/** 预览滚动 → 编辑器定位：视口顶部第一个可见块对应的源码行号 */
+/** 预览滚动 → 编辑器定位：视口顶部第一个可见块对应的源码行号，对齐到编辑器顶部 */
 function syncPreviewToEditor() {
   if (!editorView || !previewPaneEl.value) return
+  const scroller = editorView.scrollDOM
   const pane = previewPaneEl.value
+  const viewport = scroller.clientHeight
+  if (viewport <= 0) return
   const paneRect = pane.getBoundingClientRect()
   // 纯几何遍历：找第一个“底部越过视口顶边”的 data-line 块（不依赖命中测试）
   let target: HTMLElement | null = null
@@ -908,8 +944,18 @@ function syncPreviewToEditor() {
   if (!line) return
   const doc = editorView.state.doc
   const n = Math.min(line, doc.lines)
-  const block = editorView.lineBlockAt(doc.line(n).from)
-  editorView.scrollDOM.scrollTop = block.top - 10
+  const anchor = editorView.lineBlockAt(doc.line(n).from).top - 10
+
+  const editorMax = Math.max(0, scroller.scrollHeight - viewport)
+  const previewMax = Math.max(0, pane.scrollHeight - pane.clientHeight)
+
+  scroller.scrollTop = endCorrection(
+    anchor,
+    editorMax,
+    pane.scrollTop,
+    previewMax,
+    Math.min(pane.clientHeight, previewMax),
+  )
 }
 
 function onEditorScroll() {

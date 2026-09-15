@@ -91,6 +91,7 @@ curl -sL -o /dev/null -w "%{http_code}" \
 - **非 scoped 样式**：`App.vue` 的 `<style>` 块是非 scoped 的，` :deep()` 伪类不会被编译而是被浏览器丢弃（无效 CSS）——直接写普通后代选择器（如 `.editor .cm-editor`）。
 - **marked 传参**：直接调用 `marked.lexer/parser` 时 options 会整体替换全局 defaults，导致 `marked.use()` 注册的 renderer/扩展丢失——必须合并：`{ ...marked.defaults, async: false, breaks: true }`。
 - **滚动同步锁**：双向滚动同步（`onEditorScroll`/`onPreviewScroll`）用 `syncSource` + 120ms 时间戳锁防抖，修改时注意别破坏。
+- **滚动联动的「到底」补偿**（`syncEditorToPreview`/`syncPreviewToEditor` 里的 `endCorrection`）：锚点法只把「编辑器视口首行对应的块」对齐到面板顶部，**文档末尾必然够不到底**——预览把同样内容排得更高，编辑器到底时视口首行下面还剩近一屏，表现就是「左侧到底了、右侧还差一屏」（实测 AGENTS.md：编辑器 100% 时预览只有 76%，差 850px）。修法是距末尾一个视口内用凸组合 `anchor*(1-w) + max*w` 平滑拉到末尾。**不要**改成和「底部对齐锚点」混合：那个锚点可能**小于**顶部锚点，会让预览先往回退、最后再突然跳到底（已实测复现 65.5%→62.4%→59.8%→100%）。凸组合因为 `anchor ≤ max` 且两者都随滚动单调不减，结果天然单调；中段（w=0）与老的锚点算法逐像素一致。
 - **签名相关**：`tauri.conf.json` 的 `bundle.createUpdaterArtifacts: true` 必须保留（否则不生成 `.sig`）；发布时签名环境变量由 release.sh 设置（私钥内容 + Windows 路径，gitbash 的 `/c/...` 风格路径 Rust 端不识别）。
 - **图标**：源文件是 `assets/app-icon.svg`（同时复制一份到 `public/app-icon.svg` 供网页 favicon / 工具栏 logo 使用）。改图标后必须跑 `npx tauri icon assets/app-icon.svg` 重新生成 `src-tauri/icons/`，生成完删掉多余的 `icons/android`、`icons/ios`（本项目只发桌面端）。
 - **文件关联 ProgID**：NSIS 安装包用 `tauri.conf.json` 的 `bundle.fileAssociations[].name`（`MDEditor.md`），而 MSI 的 WiX 模板把 ProgID 写死成 `<productName>.<ext>`（`md-editor.md`）——**两个安装包的 ProgID 天生不同**。`file_assoc.rs` 的 `resolve_prog_id()` 会复用已经指向本 exe 的那个，避免"打开方式"里出现两个同名条目；改 `fileAssociations.name` 时必须同步 `DEFAULT_PROG_ID`。注册全部写 **HKCU**，不要改成 HKLM（会强制要求管理员权限）。
