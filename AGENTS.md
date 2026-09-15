@@ -92,3 +92,11 @@ curl -sL -o /dev/null -w "%{http_code}" \
 - **marked 传参**：直接调用 `marked.lexer/parser` 时 options 会整体替换全局 defaults，导致 `marked.use()` 注册的 renderer/扩展丢失——必须合并：`{ ...marked.defaults, async: false, breaks: true }`。
 - **滚动同步锁**：双向滚动同步（`onEditorScroll`/`onPreviewScroll`）用 `syncSource` + 120ms 时间戳锁防抖，修改时注意别破坏。
 - **签名相关**：`tauri.conf.json` 的 `bundle.createUpdaterArtifacts: true` 必须保留（否则不生成 `.sig`）；发布时签名环境变量由 release.sh 设置（私钥内容 + Windows 路径，gitbash 的 `/c/...` 风格路径 Rust 端不识别）。
+- **图标**：源文件是 `assets/app-icon.svg`（同时复制一份到 `public/app-icon.svg` 供网页 favicon / 工具栏 logo 使用）。改图标后必须跑 `npx tauri icon assets/app-icon.svg` 重新生成 `src-tauri/icons/`，生成完删掉多余的 `icons/android`、`icons/ios`（本项目只发桌面端）。
+- **文件关联 ProgID**：NSIS 安装包用 `tauri.conf.json` 的 `bundle.fileAssociations[].name`（`MDEditor.md`），而 MSI 的 WiX 模板把 ProgID 写死成 `<productName>.<ext>`（`md-editor.md`）——**两个安装包的 ProgID 天生不同**。`file_assoc.rs` 的 `resolve_prog_id()` 会复用已经指向本 exe 的那个，避免"打开方式"里出现两个同名条目；改 `fileAssociations.name` 时必须同步 `DEFAULT_PROG_ID`。注册全部写 **HKCU**，不要改成 HKLM（会强制要求管理员权限）。
+- **debug 构建不自动写关联**：`lib.rs` 的 setup 里有 `!cfg!(debug_assertions)` 判断——否则用 `npm run tauri dev` 跑一次就会把已安装版本的关联悄悄改成 `target/debug` 下的临时 exe，之后双击 `.md` 打不开。开发时要测关联，在设置里手动点「设为默认 / 修复关联」。
+- **fileAssociations 的 description 必须是纯 ASCII**：MSI 的 WiX 模板用 `!(loc.TauriCodepage)`，en-US 下是 **1252 代码页**，写中文会让 `light.exe` 直接报 `error LGHT0311` 打包失败（NSIS 是 `Unicode true` 所以中文没问题）。要中文得把 `bundle.windows.wix.language` 改成 `zh-CN`（codepage 936），但会把 MSI 资产名变成 `_zh-CN.msi`，需同步本规范。当前用 ASCII `Markdown Document`，安装后首次启动 `register()` 会把 ProgID 默认值和 `FriendlyTypeName` 覆盖成「Markdown 编辑器」，实际不影响用户看到的名称。
+- **发版前清 bundle 目录**：`scripts/release.sh` 用 `ls "$BUNDLE"/msi/*.msi | head -1` 挑 MSI，目录里的旧版本残留会被误传。`rm -rf src-tauri/target/release/bundle` 后再发。
+- **默认应用无法静默改**：Windows 10/11 的 `HKCU\...\FileExts\.md\UserChoice` 带校验哈希，第三方程序写不出合法值。`set_default_editor` 只做"能写就写"，写不动时调 `ms-settings:defaultapps?registeredAppUser=md-editor` 让用户确认——这是唯一合规路径，**不要尝试实现 UserChoice 哈希算法**。
+- **"打开方式"传文件靠命令行参数**：Windows/Linux 双击 `.md` 是新进程带 argv 启动，不是深链接。因此 `lib.rs` 用 `pick_documents(std::env::args_os())` 解析，并注册 `tauri-plugin-single-instance`（**必须是第一个注册的插件**）把二次启动的参数转交给已运行实例。冷启动时前端可能还没挂载监听，所以文件先进 `PendingFiles` 队列、由 `take_pending_open_files` 取走，`md-open-files` 事件只是唤醒信号——不要改成"事件里带路径"的写法，会丢文件。
+

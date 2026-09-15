@@ -10,6 +10,7 @@
 - **最近文件**：自动记忆最近 8 个文件，下次启动自动恢复上次文档
 - **Markdown 渲染**：GFM 表格/任务清单、KaTeX 数学公式（`$...$` / `$$...$$`）、Mermaid 图表、代码语法高亮（highlight.js）
 - **主题与设置**：暗色主题跟随系统（或手动指定），编辑器字体/字号可调
+- **文件关联**：注册为 `.md` / `.markdown` 的打开方式，双击文件直接用本程序打开；已运行时再次双击会在**同一个窗口**新开标签（单实例转交）
 - **导出**：导出独立 HTML 文件；通过系统打印对话框另存为 PDF
 - **自动更新**：启动静默检查新版本，发现更新后横幅提示，一键下载安装
 
@@ -23,6 +24,18 @@
 | `md-editor_<版本>_x64_en-US.msi` | MSI 安装包（适合企业分发/静默安装） |
 
 > 自动更新仅对 NSIS 安装包生效；MSI 安装的用户需手动下载新版。
+
+### 设为 .md 默认打开方式
+
+安装包会自动把本程序登记到 Windows 的「打开方式」列表。若要让双击 `.md` 直接打开本程序：
+
+1. 打开应用 → **⚙️ 设置 → 📄 文件关联**；
+2. 点 **「设为默认」**：
+   - 系统未锁定该扩展名时，会立即生效；
+   - 若你之前手动选过其他默认程序，Windows 会保护该选择，此时应用会自动打开系统的「默认应用」页面，在其中选择 **Markdown 编辑器** 即可；
+3. 也可以点 **「用「打开方式」选择」**，在系统对话框里勾选 *始终使用此应用打开 .md 文件*。
+
+> 关联注册全部写在 `HKCU`（当前用户）下，**不需要管理员权限**，也不会影响其他 Windows 账户。
 
 ## ⌨️ 快捷键
 
@@ -47,14 +60,17 @@ npm run tauri build   # 打包 release
 项目结构：
 
 ```
+assets/app-icon.svg   # 应用图标源文件（改图标后跑 npx tauri icon assets/app-icon.svg）
 src/                  # 前端（Vue 3 + TS + Vite）
 ├── App.vue           # 主界面：标签页 + 分屏编辑器 + 工具栏
 ├── components/
 │   ├── FileTree.vue      # 文件树
-│   └── SettingsModal.vue # 设置弹窗（主题/字体/更新）
+│   └── SettingsModal.vue # 设置弹窗（主题/字体/更新/文件关联）
 └── types.ts          # 共享类型定义
 src-tauri/            # Tauri 外壳（Rust）
-└── src/lib.rs        # 文件读写/目录/导出命令 + 插件注册
+├── src/lib.rs        # 文件读写/目录/导出命令 + 单实例与"打开方式"文件转交
+├── src/file_assoc.rs # Windows 文件关联注册（HKCU，无需管理员）
+└── tauri.conf.json   # bundle.fileAssociations 声明 .md / .markdown
 scripts/release.sh    # 一键发布脚本
 ```
 

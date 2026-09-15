@@ -17,6 +17,22 @@ export interface AppSettings {
   fontFamily: string
 }
 
+/** Windows 文件关联状态（对应 Rust 侧 AssociationStatus） */
+export interface AssociationStatus {
+  exe: string
+  registered: boolean
+  is_default: boolean
+  current_prog_id: string | null
+  user_choice_locked: boolean
+}
+
+/** 「设为默认」的返回结果 */
+export interface SetDefaultResult {
+  ok: boolean
+  need_confirm: boolean
+  settings_opened: boolean
+}
+
 export const DEFAULT_SETTINGS: AppSettings = {
   themeMode: 'auto',
   fontSize: 14,

@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1024" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3B7BFF" />
+      <stop offset="0.55" stop-color="#4F5BFA" />
+      <stop offset="1" stop-color="#7A4DF5" />
+    </linearGradient>
+    <linearGradient id="gloss" x1="512" y1="0" x2="512" y2="640" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.26" />
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0" />
+    </linearGradient>
+    <linearGradient id="mark" x1="332" y1="320" x2="692" y2="460" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2F63F0" />
+      <stop offset="1" stop-color="#6C3FE6" />
+    </linearGradient>
+    <filter id="pageShadow" x="120" y="80" width="784" height="864" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="20" stdDeviation="30" flood-color="#101A3A" flood-opacity="0.34" />
+    </filter>
+    <clipPath id="bgClip">
+      <rect width="1024" height="1024" rx="228" />
+    </clipPath>
+  </defs>
+
+  <!-- 圆角方形底：蓝紫渐变 + 顶部微光 -->
+  <g clip-path="url(#bgClip)">
+    <rect width="1024" height="1024" fill="url(#bg)" />
+    <rect width="1024" height="640" fill="url(#gloss)" />
+  </g>
+
+  <!-- 文档页 -->
+  <g filter="url(#pageShadow)">
+    <rect x="252" y="172" width="520" height="680" rx="46" fill="#FFFFFF" />
+  </g>
+
+  <!-- Markdown 标记 M↓ -->
+  <g transform="translate(270.3 238.3) scale(2.0571)">
+    <path
+      d="M30 98V30h20l20 25 20-25h20v68H90V59L70 84 50 59v39zm125 0l-30-33h20V30h20v35h20z"
+      fill="url(#mark)" />
+  </g>
+
+  <!-- 正文示意 -->
+  <g fill="#C9D4E8">
+    <rect x="332" y="540" width="360" height="30" rx="15" />
+    <rect x="332" y="606" width="300" height="30" rx="15" />
+    <rect x="332" y="672" width="240" height="30" rx="15" />
+  </g>
+</svg>

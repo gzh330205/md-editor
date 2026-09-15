@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
+import type { UnlistenFn } from '@tauri-apps/api/event'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { getVersion } from '@tauri-apps/api/app'
 import { check } from '@tauri-apps/plugin-updater'
@@ -28,7 +30,7 @@ import katexCss from 'katex/dist/katex.min.css?raw'
 import FileTree from './components/FileTree.vue'
 import SettingsModal from './components/SettingsModal.vue'
 import { DEFAULT_SETTINGS, fontFamilyFor } from './types'
-import type { AppSettings, ThemeMode } from './types'
+import type { AppSettings, AssociationStatus, SetDefaultResult, ThemeMode } from './types'
 
 // ---------- KaTeX 数学公式（marked 自定义扩展：$...$ 与 $$...$$） ----------
 const inlineMathExt: TokenizerAndRendererExtension = {
@@ -539,8 +541,8 @@ async function saveStore() {
   }
 }
 
+/** 载入本地设置与最近文件列表（不打开任何文档） */
 async function initStore() {
-  let restored = false
   try {
     store = await load('settings.json', { autoSave: false })
     const recent = await store.get<string[]>('recentFiles')
@@ -554,6 +556,17 @@ async function initStore() {
       treeRoot.value = root
       showTree.value = true
     }
+  } catch {
+    store = null
+  }
+  applyTheme() // 确保界面框架/编辑器/预览主题一致
+}
+
+/** 恢复上次文档；没有可恢复的文档时展示欢迎页 */
+async function restoreSession() {
+  let restored = false
+  // 由系统"打开方式"启动时已经打开了传进来的文件，不再恢复上次会话
+  if (!shellOpenedFile && store) {
     const lastFile = await store.get<string>('lastFile')
     if (typeof lastFile === 'string' && lastFile) {
       try {
@@ -564,11 +577,8 @@ async function initStore() {
         /* 文件已被移动/删除，忽略 */
       }
     }
-  } catch {
-    store = null
   }
   if (!restored && tabs.value.length === 0) openUntitled(WELCOME)
-  applyTheme() // 确保界面框架/编辑器/预览主题一致
   void renderPreview()
 }
 
@@ -585,6 +595,94 @@ async function openRecent(e: Event) {
     window.alert(`打开文件失败：${err}`)
   }
 }
+
+// ---------- 系统"打开方式"传入的文件 ----------
+// 双击 .md 时系统把路径当命令行参数传给新进程；若程序已在运行，
+// 单实例插件会把路径转交给当前实例并触发 md-open-files 事件。
+let shellOpenedFile = false
+let unlistenOpenFiles: UnlistenFn | null = null
+
+async function consumePendingFiles() {
+  let paths: string[] = []
+  try {
+    paths = await invoke<string[]>('take_pending_open_files')
+  } catch {
+    return
+  }
+  for (const p of paths) {
+    try {
+      const c = await invoke<string>('read_file_at', { path: p })
+      openTab(p, c)
+      await rememberFile(p)
+      shellOpenedFile = true
+    } catch (e) {
+      window.alert(`打开文件失败：${p}\n${e}`)
+    }
+  }
+}
+
+// ---------- 文件关联（默认用本程序打开 .md） ----------
+const assoc = ref<AssociationStatus | null>(null)
+const assocBusy = ref(false)
+const assocMessage = ref('')
+
+async function refreshAssoc() {
+  try {
+    assoc.value = await invoke<AssociationStatus>('association_status')
+  } catch {
+    assoc.value = null
+  }
+}
+
+async function setDefaultEditor() {
+  assocBusy.value = true
+  assocMessage.value = ''
+  try {
+    const r = await invoke<SetDefaultResult>('set_default_editor')
+    await refreshAssoc()
+    if (r.ok) {
+      assocMessage.value = '✅ 已设为默认 Markdown 编辑器'
+    } else if (r.settings_opened) {
+      assocMessage.value =
+        '已打开系统「默认应用」设置页：请在其中找到「Markdown 编辑器」，把 .md / .markdown 设为它。'
+    } else {
+      assocMessage.value =
+        '系统未允许直接修改，请到「设置 → 应用 → 默认应用」中手动选择「Markdown 编辑器」。'
+    }
+  } catch (e) {
+    assocMessage.value = `设置失败：${e}`
+  } finally {
+    assocBusy.value = false
+  }
+}
+
+async function repairAssoc() {
+  assocBusy.value = true
+  assocMessage.value = ''
+  try {
+    assoc.value = await invoke<AssociationStatus>('register_file_association')
+    assocMessage.value = '已重新注册文件关联'
+  } catch (e) {
+    assocMessage.value = `注册失败：${e}`
+  } finally {
+    assocBusy.value = false
+  }
+}
+
+async function openWithDialog() {
+  try {
+    await invoke('open_with_dialog')
+  } catch (e) {
+    window.alert(`打开"打开方式"对话框失败：${e}`)
+  }
+}
+
+watch(showSettings, (visible) => {
+  if (visible) {
+    assocMessage.value = ''
+    void refreshAssoc()
+  }
+})
 
 // ---------- 文件树 ----------
 async function toggleTree() {
@@ -856,7 +954,7 @@ function onPreviewClick(e: MouseEvent) {
 }
 
 // ---------- 生命周期 ----------
-onMounted(() => {
+onMounted(async () => {
   if (!editorEl.value) return
   editorView = new EditorView({
     parent: editorEl.value,
@@ -866,8 +964,20 @@ onMounted(() => {
   window.addEventListener('keydown', onGlobalKey, true)
   previewPaneEl.value?.addEventListener('scroll', onPreviewScroll)
 
-  void initStore()
+  // 顺序很重要：
+  // 1) 先挂监听，避免处理过程中漏掉新的"打开方式"事件；
+  // 2) 再载入 store，否则 rememberFile() 无 store 可写，文件进不了最近列表；
+  // 3) 然后处理系统传来的文件；
+  // 4) 最后恢复上次会话（本次由系统传了文件就跳过）。
+  unlistenOpenFiles = await listen('md-open-files', () => {
+    void consumePendingFiles()
+  })
+  await initStore()
+  await consumePendingFiles()
+  await restoreSession()
+
   void initUpdater()
+  void refreshAssoc()
 })
 
 async function initUpdater() {
@@ -884,6 +994,8 @@ onBeforeUnmount(() => {
   editorView?.scrollDOM.removeEventListener('scroll', onEditorScroll)
   window.removeEventListener('keydown', onGlobalKey, true)
   previewPaneEl.value?.removeEventListener('scroll', onPreviewScroll)
+  unlistenOpenFiles?.()
+  unlistenOpenFiles = null
   mq.removeEventListener('change', onSchemeChange)
   themeStyleEl.remove()
   window.clearTimeout(renderTimer)
@@ -908,7 +1020,10 @@ onBeforeUnmount(() => {
     </div>
 
     <header class="toolbar">
-      <span class="brand">📝 Markdown 编辑器</span>
+      <span class="brand">
+        <img class="brand-icon" src="/app-icon.svg" alt="" />
+        Markdown 编辑器
+      </span>
       <div class="btn-group">
         <button @click="newFile">新建</button>
         <button @click="openFile">打开…</button>
@@ -975,9 +1090,15 @@ onBeforeUnmount(() => {
       :visible="showSettings"
       :settings="settings"
       :version="appVersion"
+      :assoc="assoc"
+      :assoc-busy="assocBusy"
+      :assoc-message="assocMessage"
       @close="showSettings = false"
       @change="updateSettings"
       @check-update="checkForUpdate(true)"
+      @set-default="setDefaultEditor"
+      @repair-assoc="repairAssoc"
+      @open-with="openWithDialog"
     />
   </div>
 </template>
@@ -1118,8 +1239,18 @@ body {
 }
 
 .brand {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   font-weight: 600;
   white-space: nowrap;
+}
+
+.brand-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  flex: none;
 }
 
 .btn-group {
